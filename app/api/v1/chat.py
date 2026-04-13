@@ -63,8 +63,15 @@ async def chat_completions(req: ChatCompletionRequest):
         queue: asyncio.Queue = asyncio.Queue()
         state["stream_queue"] = queue
 
+        from app.logger import get_logger
+        _log = get_logger(__name__)
+
         async def run_graph() -> None:
-            await eda_graph.ainvoke(state)
+            try:
+                await eda_graph.ainvoke(state)
+            except Exception as exc:
+                _log.exception("chat stream graph error: %s", exc)
+                await queue.put(None)
 
         asyncio.create_task(run_graph())
 

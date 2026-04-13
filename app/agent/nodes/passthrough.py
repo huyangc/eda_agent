@@ -15,7 +15,24 @@ from app.agent.state import AgentState
 from app.llm.factory import get_llm
 from app.logger import get_logger, req_id
 
+_MAX_TOOL_RESULT_CHARS = 80_000   # truncate total payload sent to LLM (DeepSeek-friendly)
+_MAX_TOTAL_MSG_CHARS  = 80_000   # hard cap on total message history sent to LLM
+_MAX_CONCURRENT_LLM   = 10       # max concurrent LLM API calls (DeepSeek rate-limit friendly)
+
 logger = get_logger(__name__)
+
+# Global semaphore to throttle concurrent DeepSeek API calls.
+# Claude Code CLI fires many parallel requests — without throttling
+# they queue up on DeepSeek's side and time out.
+_llm_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_semaphore() -> asyncio.Semaphore:
+    """"Lazily create the semaphore in the running event loop."""
+    global _llm_semaphore
+    if _llm_semaphore is None:
+        _llm_semaphore = asyncio.Semaphore(_MAX_CONCURRENT_LLM)
+    return _llm_semaphore
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +117,106 @@ def _build_content_blocks(msg: AIMessage) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _is_transient(exc: Exception) -> bool:
+    """Return True for errors that are worth a single retry."""
+    name = type(exc).__name__
+    return "Connection" in name or "Timeout" in name or "RateLimit" in name
+
+
+async def _compress_tool_results(messages: list, rid: str) -> list:
+    """Compress ToolMessage content if the total payload is too large.
+
+    Instead of hard truncation, use a fast LLM to summarize the oversized output,
+    preserving key information for the main reasoning model.
+    """
+    from langchain_core.messages import ToolMessage as LCToolMessage
+    from langchain_core.messages import HumanMessage
+    from app.config import settings
+
+    total = sum(len(m.content) for m in messages if isinstance(m, LCToolMessage))
+    if total <= _MAX_TOOL_RESULT_CHARS:
+        return messages
+
+    logger.warning(
+        "%s [passthrough      ]  tool_result payload too large (%d chars) — compressing",
+        rid, total,
+    )
+
+    # Budget: distribute _MAX_TOOL_RESULT_CHARS equally across all ToolMessages
+    tool_msgs = [m for m in messages if isinstance(m, LCToolMessage)]
+    per_msg = _MAX_TOOL_RESULT_CHARS // max(len(tool_msgs), 1)
+
+    fast_llm = get_llm(model=settings.tool_use_model, temperature=0.0, timeout=20.0)
+    compressed = []
+    
+    for m in messages:
+        if isinstance(m, LCToolMessage) and len(m.content) > per_msg:
+            prompt = (
+                f"You are an expert system summarizer. The following is output from a tool/command. "
+                f"It is too large and needs to be compressed. "
+                f"Extract the most essential information (IDs, paths, errors, metrics, key values). "
+                f"Discard boilerplate, repetitive logs, formatting, and noise. KEEP IT CONCISE.\n\n"
+                f"<tool_output>\n{m.content[:per_msg * 4]}\n</tool_output>\n\n"
+                f"Output ONLY the compressed summary."
+            )
+            try:
+                async with _get_semaphore():
+                    summary = await fast_llm.ainvoke([HumanMessage(content=prompt)])
+                new_content = str(summary.content) + f"\n... [LLM Compressed, original length {len(m.content)}]"
+                compressed.append(LCToolMessage(content=new_content, tool_call_id=m.tool_call_id))
+            except Exception as e:
+                logger.warning("%s [passthrough      ]  compression failed, truncating instead: %s", rid, e)
+                new_content = m.content[:per_msg] + f"\n... [truncated, original length {len(m.content)}]"
+                compressed.append(LCToolMessage(content=new_content, tool_call_id=m.tool_call_id))
+        else:
+            compressed.append(m)
+            
+    return compressed
+
+
+def _trim_message_history(messages: list, rid: str) -> list:
+    """Sliding-window trim: keep system + the most recent messages within budget.
+
+    Prevents total message payload from growing unboundedly across tool-use
+    turns.  Always preserves the first message (system prompt) and the last
+    few messages so the LLM has enough context.
+    """
+    total = sum(len(getattr(m, 'content', '') or '') for m in messages)
+    if total <= _MAX_TOTAL_MSG_CHARS:
+        return messages
+
+    logger.warning(
+        "%s [passthrough      ]  total message history too large (%d chars) — trimming",
+        rid, total,
+    )
+
+    # Strategy: keep the first message (system) and drop the oldest
+    # middle messages until we fit.
+    if len(messages) <= 2:
+        return messages
+
+    head = messages[:1]        # system prompt
+    tail = list(messages[1:])  # everything else
+
+    while tail and sum(len(getattr(m, 'content', '') or '') for m in head + tail) > _MAX_TOTAL_MSG_CHARS:
+        tail.pop(0)  # drop the oldest non-system message
+        # Keep dropping until we hit a HumanMessage, to avoid breaking the 
+        # AIMessage(tool_calls) -> ToolMessage chain which causes API 400 errors.
+        while tail and getattr(tail[0], "type", "") != "human":
+            tail.pop(0)
+
+    if not tail:
+        # Extreme case: even a single message exceeds the budget — keep last one
+
+        tail = [messages[-1]]
+
+    return head + tail
+
+
+# ---------------------------------------------------------------------------
 # Node
 # ---------------------------------------------------------------------------
 
@@ -122,11 +239,12 @@ async def _passthrough_text(state: AgentState, queue, rid: str) -> dict:
     llm = get_llm(streaming=True)
     full_content = ""
 
-    async for chunk in llm.astream(list(state["messages"])):
-        token: str = chunk.content or ""
-        full_content += token
-        if queue is not None:
-            await queue.put(token)
+    async with _get_semaphore():
+        async for chunk in llm.astream(list(state["messages"])):
+            token: str = chunk.content or ""
+            full_content += token
+            if queue is not None:
+                await queue.put(token)
 
     if queue is not None:
         await queue.put(None)
@@ -154,14 +272,61 @@ async def _passthrough_with_tools(
         rid, [t["name"] for t in tools],
     )
 
+    from app.config import settings
     oai_tools = _to_openai_tools(tools)
-    llm = get_llm(streaming=False).bind_tools(oai_tools)  # type: ignore[attr-defined]
+    llm = get_llm(streaming=False, model=settings.tool_use_model, timeout=45.0).bind_tools(oai_tools)  # type: ignore[attr-defined]
 
-    msg: AIMessage = await llm.ainvoke(list(state["messages"]))
+    messages = list(state["messages"])
+    # Bypass all trimming/truncation per user request (retaining all history for huge context models like Qwen)
+    # messages = _trim_message_history(messages, rid)
+
+    # Check payload size before calling LLM — fail fast if too large even after trimming
+    total_chars = sum(len(getattr(m, 'content', '') or '') for m in messages)
+
+    # Retry once on transient connection errors
+    msg: AIMessage
+    for attempt in range(2):
+        try:
+            async with _get_semaphore():
+                msg = await llm.ainvoke(messages)
+            break
+        except Exception as exc:
+            if attempt == 0 and _is_transient(exc):
+                # Don't retry if the payload is too large — it will just time out again
+                if total_chars > _MAX_TOTAL_MSG_CHARS:
+                    logger.warning(
+                        "%s [passthrough      ]  payload too large (%d chars) for retry — failing fast",
+                        rid, total_chars,
+                    )
+                else:
+                    logger.warning("%s [passthrough      ]  connection error (attempt 1), retrying: %s", rid, exc)
+                    await asyncio.sleep(2)
+                    continue
+            # Final failure — return an error text so the client doesn't see an empty end_turn
+            err_text = f"[Backend error: {type(exc).__name__}. Please try again.]"
+            logger.error("%s [passthrough      ]  LLM call failed: %s", rid, exc)
+            if queue is not None:
+                await queue.put(err_text)
+                await queue.put({"type": "stop", "stop_reason": "end_turn"})
+                await queue.put(None)
+            return {
+                "final_response": err_text,
+                "response_content_blocks": [{"type": "text", "text": err_text}],
+                "token_usage": {},
+            }
 
     content_blocks = _build_content_blocks(msg)
     stop_reason = "tool_use" if any(b["type"] == "tool_use" for b in content_blocks) else "end_turn"
     full_text = "".join(b.get("text", "") for b in content_blocks if b["type"] == "text")
+
+    # Guard: empty response (no text, no tool_calls) causes Claude Code to hang
+    # because the Anthropic protocol requires at least one content block.
+    if not content_blocks:
+        logger.warning("%s [passthrough      ]  EMPTY response from LLM — injecting fallback text", rid)
+        fallback = "I've processed the information. How can I help you further?"
+        content_blocks = [{"type": "text", "text": fallback}]
+        full_text = fallback
+        msg.content = fallback
 
     logger.info(
         "%s [passthrough      ]  stop_reason=%s  blocks=%d",
@@ -173,7 +338,14 @@ async def _passthrough_with_tools(
         await queue.put(None)
 
     if tw := state.get("trace_writer"):
-        tw.llm_response("passthrough_tool_use", full_text)
+        tool_calls_made = getattr(msg, "tool_calls", []) or []
+        if tool_calls_made:
+            tw.tool_calls([
+                {"id": tc.get("id"), "name": tc["name"], "args": tc.get("args", {})}
+                for tc in tool_calls_made
+            ])
+        if full_text:
+            tw.llm_response("passthrough_tool_use", full_text)
 
     return {
         "final_response": full_text,

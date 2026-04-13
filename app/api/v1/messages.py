@@ -242,6 +242,22 @@ async def create_message(req: MessagesRequest, http_req: Request):
         messages=[{"role": m.role, "content": m.text()} for m in req.messages],
     )
 
+    # Log any tool_result blocks sent back by the client this turn
+    tool_results_this_turn = []
+    for m in req.messages:
+        if m.role == "user" and isinstance(m.content, list):
+            for block in m.content:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    content = block.get("content", "")
+                    if isinstance(content, list):
+                        content = _extract_text(content)
+                    tool_results_this_turn.append({
+                        "tool_use_id": block.get("tool_use_id", ""),
+                        "content": content,
+                    })
+    if tool_results_this_turn:
+        tw.tool_results(tool_results_this_turn)
+
     has_tools = bool(req.tools)
     mode_label = "stream" if req.stream else "sync"
     logger.info(
@@ -261,9 +277,15 @@ async def create_message(req: MessagesRequest, http_req: Request):
         state["stream_queue"] = queue
 
         async def run_graph() -> None:
-            await eda_graph.ainvoke(state)
-            elapsed = time.monotonic() - t_start
-            logger.info("%s ── DONE ── %.2fs  session=%s", rid, elapsed, session_id)
+            try:
+                await eda_graph.ainvoke(state)
+                elapsed = time.monotonic() - t_start
+                logger.info("%s ── DONE ── %.2fs  session=%s", rid, elapsed, session_id)
+            except Exception as exc:
+                elapsed = time.monotonic() - t_start
+                logger.exception("%s ── ERROR ── %.2fs  session=%s  %s", rid, elapsed, session_id, exc)
+                # Unblock the SSE consumer so the client doesn't hang forever
+                await queue.put(None)
 
         asyncio.create_task(run_graph())
 

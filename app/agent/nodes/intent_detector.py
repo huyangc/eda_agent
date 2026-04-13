@@ -31,7 +31,8 @@ async def intent_detector_node(state: AgentState) -> dict:
     """Classify whether the user's request is EDA-related."""
     user_text = _last_user_content(state["messages"])
 
-    llm = get_llm(json_mode=True, temperature=0.0)
+    from app.config import settings
+    llm = get_llm(json_mode=True, temperature=0.0, model=settings.tool_use_model)
     from langchain_core.messages import HumanMessage, SystemMessage
 
     response = await llm.ainvoke([

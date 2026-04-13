@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     # Agent behaviour
     intent_confidence_threshold: float = 0.7
     max_commands_to_retrieve: int = 5
+    # Model used for tool-use decisions in passthrough (should be a fast
+    # non-reasoning model — tool routing doesn't need deep reasoning).
+    # Overrides llm_model for that specific path only.
+    tool_use_model: str = "deepseek-chat"
 
     # Logging & tracing
     log_dir: str = "logs"

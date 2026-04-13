@@ -1,7 +1,7 @@
 """Session-level trace writer.
 
 Each request gets a JSONL file under:
-    logs/YYYY-MM-DD/{session_id}.jsonl
+    logs/YYYY-MM-DD/{HHMMSS}_{session_id}.jsonl
 
 Every line is a self-contained JSON event:
     {"ts": "09:40:34.123", "type": "request",      "data": { full incoming messages }}
@@ -25,10 +25,12 @@ class TraceWriter:
 
     def __init__(self, session_id: str, log_dir: str = "logs") -> None:
         self.session_id = session_id
-        today = date.today().isoformat()
+        now = datetime.now()
+        today = now.strftime("%Y-%m-%d")
+        time_prefix = now.strftime("%H%M%S")
         dir_path = Path(log_dir) / today
         dir_path.mkdir(parents=True, exist_ok=True)
-        self._path = dir_path / f"{session_id}.jsonl"
+        self._path = dir_path / f"{time_prefix}_{session_id}.jsonl"
 
     def write(self, event_type: str, data: dict) -> None:
         entry = {
@@ -82,3 +84,11 @@ class TraceWriter:
             "output_mode": mode,
             "content": content,
         })
+
+    def tool_calls(self, calls: list[dict]) -> None:
+        """LLM decided to call tools — log what it asked for."""
+        self.write("tool_calls", {"calls": calls})
+
+    def tool_results(self, results: list[dict]) -> None:
+        """Tool execution results returned to the LLM."""
+        self.write("tool_results", {"results": results})

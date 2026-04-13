@@ -41,7 +41,7 @@ async def command_extractor_node(state: AgentState) -> dict:
     user_text = _last_user_content(state["messages"])
 
     system = _SYSTEM_PROMPT.format(max_cmds=settings.max_commands_to_retrieve)
-    llm = get_llm(json_mode=True, temperature=0.0)
+    llm = get_llm(json_mode=True, temperature=0.0, model=settings.tool_use_model)
 
     response = await llm.ainvoke([
         SystemMessage(content=system),

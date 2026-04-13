@@ -9,6 +9,21 @@ from app.agent.routing import route_after_command_extractor, route_after_intent
 from app.agent.state import AgentState
 
 
+def _route_entry(state: AgentState) -> str:
+    """Short-circuit to passthrough when the request carries tools.
+
+    Tool-bearing requests come from Claude Code subagents performing file /
+    shell operations — they are never EDA queries and must never enter the
+    intent / RAG pipeline.
+    """
+    if state.get("tools") or state.get("forced_tool"):
+        # forced_tool is set only when the API caller explicitly picks an EDA
+        # namespace, so only plain tools (subagent calls) get the short-circuit.
+        if state.get("tools") and not state.get("forced_tool"):
+            return "passthrough"
+    return "intent_detector"
+
+
 def build_graph():
     g = StateGraph(AgentState)
 
@@ -18,7 +33,10 @@ def build_graph():
     g.add_node("response_generator", response_generator_node)
     g.add_node("passthrough", passthrough_node)
 
-    g.set_entry_point("intent_detector")
+    g.set_conditional_entry_point(
+        _route_entry,
+        {"intent_detector": "intent_detector", "passthrough": "passthrough"},
+    )
 
     g.add_conditional_edges(
         "intent_detector",
