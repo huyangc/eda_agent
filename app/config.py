@@ -35,5 +35,8 @@ class Settings(BaseSettings):
     intent_confidence_threshold: float = 0.7
     max_commands_to_retrieve: int = 5
 
+    # Logging & tracing
+    log_dir: str = "logs"
+
 
 settings = Settings()

@@ -71,6 +71,8 @@ async def response_generator_node(state: AgentState) -> dict:
         "%s [response_gen     ]  mode=%-5s  %s  chars=%d",
         rid, output_mode, stream_label, len(full_content),
     )
+    if tw := state.get("trace_writer"):
+        tw.llm_response(output_mode, full_content)
     return {
         "final_response": full_content,
         "token_usage": usage,

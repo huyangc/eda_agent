@@ -27,4 +27,6 @@ async def passthrough_node(state: AgentState) -> dict:
         await queue.put(None)  # sentinel
 
     logger.info("%s [passthrough      ]  chars=%d", rid, len(full_content))
+    if tw := state.get("trace_writer"):
+        tw.llm_response("passthrough", full_content)
     return {"final_response": full_content, "token_usage": {}}

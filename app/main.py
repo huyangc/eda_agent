@@ -7,7 +7,7 @@ from app.config import settings
 from app.logger import setup_logging
 from app.rag.client import RAGClient
 
-setup_logging(settings.log_level)
+setup_logging(settings.log_level, settings.log_dir)
 
 
 @asynccontextmanager

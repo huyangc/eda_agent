@@ -42,39 +42,44 @@ async def rag_retriever_node(state: AgentState) -> dict:
     namespace = state["detected_tool_namespace"]
     candidates = state["raw_command_candidates"]
     user_query = _last_user_content(state["messages"])
+    tw = state.get("trace_writer")
 
-    # Issue one query per command candidate for better precision,
-    # each enriched with the user's original query for context.
     k_per_query = max(1, settings.rag_top_k // max(len(candidates), 1))
     seen: dict[str, dict] = {}
 
     for candidate in candidates:
         query = f"{candidate} {user_query}".strip()
+        if tw:
+            tw.rag_query(query, namespace, k_per_query)
         docs = await client.retrieve(query=query, namespace=namespace, top_k=k_per_query)
+        if tw:
+            tw.rag_response(query, docs)
         for doc in docs:
             fp = _doc_fingerprint(doc)
             if fp not in seen:
                 seen[fp] = doc
 
-    # If no candidates extracted, fall back to a single query with the raw user text
+    # Fallback: single query when no candidates extracted
     if not candidates:
+        if tw:
+            tw.rag_query(user_query, namespace, settings.rag_top_k)
         docs = await client.retrieve(query=user_query, namespace=namespace)
+        if tw:
+            tw.rag_response(user_query, docs)
         for doc in docs:
             fp = _doc_fingerprint(doc)
             if fp not in seen:
                 seen[fp] = doc
 
-    # Rank by score, take top K
+    # Rank by score, take top K, filter by threshold
     all_docs = sorted(seen.values(), key=lambda d: d.get("score", 0.0), reverse=True)
     top_docs = all_docs[:settings.rag_top_k]
-
-    # Filter below score threshold
     top_docs = [d for d in top_docs if d.get("score", 1.0) >= settings.rag_score_threshold]
 
     rid = req_id(state.get("request_id", ""))
     top_score = max((d.get("score", 0.0) for d in top_docs), default=0.0)
     logger.info(
-        "%s [rag_retriever    ]  RAG %-3s  namespace=%-12s  queries=%d  docs=%d  top_score=%.2f",
+        "%s [rag_retriever    ]  RAG %-11s  namespace=%-12s  queries=%d  docs=%d  top_score=%.2f",
         rid,
         "ON" if top_docs else "ON(0 docs)",
         namespace,

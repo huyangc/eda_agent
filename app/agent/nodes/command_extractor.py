@@ -70,6 +70,8 @@ async def command_extractor_node(state: AgentState) -> dict:
         "%s [cmd_extractor    ]  namespace=%-12s  commands=%s  mode=%s",
         rid, namespace, commands, output_mode,
     )
+    if tw := state.get("trace_writer"):
+        tw.cmd_extract(namespace, commands, output_mode)
     return {
         "detected_tool_namespace": namespace,
         "raw_command_candidates": commands,

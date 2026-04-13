@@ -49,8 +49,11 @@ async def intent_detector_node(state: AgentState) -> dict:
         confidence = 0.5
 
     rid = req_id(state.get("request_id", ""))
+    reason = parsed.get("reason", "")
     logger.info(
         "%s [intent_detector   ]  intent=%-10s  confidence=%.2f  reason=%s",
-        rid, intent, confidence, parsed.get("reason", ""),
+        rid, intent, confidence, reason,
     )
+    if tw := state.get("trace_writer"):
+        tw.intent(intent, confidence, reason)
     return {"intent": intent, "intent_confidence": confidence}

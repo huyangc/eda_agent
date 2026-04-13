@@ -30,3 +30,6 @@ class AgentState(TypedDict):
 
     # Streaming — asyncio.Queue injected by the API layer; None for sync calls
     stream_queue: Optional[object]
+
+    # Tracing — TraceWriter injected by the API layer
+    trace_writer: Optional[object]
