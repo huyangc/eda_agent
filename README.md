@@ -244,7 +244,7 @@ Log format shows clear per-request traces:
 Each request gets a JSONL trace file under `logs/YYYY-MM-DD/`:
 ```
 logs/2026-04-13/
-└── 094034_a1b2c3d4.jsonl  # HHMMSS_{session_id}.jsonl
+└── a1b2c3d4.jsonl  # {session_id}.jsonl
 ```
 
 Each line is a self-contained JSON event:

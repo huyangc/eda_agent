@@ -26,9 +26,12 @@ External RAG Service (not in this repo)
 app/
 ├── main.py                  # FastAPI app factory + lifespan hooks
 ├── config.py                # All config via pydantic-settings (reads .env)
+├── logger.py                # Centralized logging with per-request tracing
+├── tracing.py               # Per-session JSONL trace writer
 ├── api/
 │   ├── router.py
 │   ├── health.py            # GET /health
+│   ├── log_viewer.py        # Log file viewer endpoint
 │   └── v1/
 │       ├── chat.py          # POST /v1/chat/completions (streaming + non-streaming)
 │       └── models.py        # GET /v1/models

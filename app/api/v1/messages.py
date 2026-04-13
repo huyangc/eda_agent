@@ -231,7 +231,15 @@ def _user_preview(req: MessagesRequest, max_len: int = 60) -> str:
 
 @router.post("/messages")
 async def create_message(req: MessagesRequest, http_req: Request):
-    session_id = http_req.headers.get("x-session-id") or uuid.uuid4().hex[:16]
+    session_id = http_req.headers.get("x-session-id")
+    if not session_id:
+        if req.messages:
+            import hashlib
+            first_msg = req.messages[0].text()
+            session_id = hashlib.md5(first_msg.encode("utf-8")).hexdigest()[:16]
+        else:
+            session_id = uuid.uuid4().hex[:16]
+            
     request_id = f"msg_{uuid.uuid4().hex}"
     rid = req_id(request_id)
     t_start = time.monotonic()

@@ -27,10 +27,9 @@ class TraceWriter:
         self.session_id = session_id
         now = datetime.now()
         today = now.strftime("%Y-%m-%d")
-        time_prefix = now.strftime("%H%M%S")
         dir_path = Path(log_dir) / today
         dir_path.mkdir(parents=True, exist_ok=True)
-        self._path = dir_path / f"{time_prefix}_{session_id}.jsonl"
+        self._path = dir_path / f"{session_id}.jsonl"
 
     def write(self, event_type: str, data: dict) -> None:
         entry = {

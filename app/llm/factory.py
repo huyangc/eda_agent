@@ -12,6 +12,7 @@ def get_llm(
     temperature: Optional[float] = None,
     model: Optional[str] = None,
     timeout: Optional[float] = 60.0,
+    max_retries: int = 2,
 ) -> BaseChatModel:
     """Return the configured LangChain chat model."""
     temp = temperature if temperature is not None else 0.1
@@ -33,6 +34,7 @@ def get_llm(
             temperature=temp,
             request_timeout=t,
             http_async_client=http_client,
+            max_retries=max_retries,
         )
         if json_mode:
             kwargs["model_kwargs"] = {"response_format": {"type": "json_object"}}

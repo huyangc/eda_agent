@@ -149,7 +149,12 @@ async def _compress_tool_results(messages: list, rid: str) -> list:
     tool_msgs = [m for m in messages if isinstance(m, LCToolMessage)]
     per_msg = _MAX_TOOL_RESULT_CHARS // max(len(tool_msgs), 1)
 
-    fast_llm = get_llm(model=settings.tool_use_model, temperature=0.0, timeout=20.0)
+    fast_llm = get_llm(
+        model=settings.tool_use_model, 
+        temperature=0.0, 
+        timeout=20.0,
+        max_retries=1
+    )
     compressed = []
     
     for m in messages:
@@ -274,7 +279,12 @@ async def _passthrough_with_tools(
 
     from app.config import settings
     oai_tools = _to_openai_tools(tools)
-    llm = get_llm(streaming=False, model=settings.tool_use_model, timeout=45.0).bind_tools(oai_tools)  # type: ignore[attr-defined]
+    llm = get_llm(
+        streaming=False, 
+        model=settings.tool_use_model, 
+        timeout=180.0, 
+        max_retries=0
+    ).bind_tools(oai_tools)  # type: ignore[attr-defined]
 
     messages = list(state["messages"])
     # Bypass all trimming/truncation per user request (retaining all history for huge context models like Qwen)
