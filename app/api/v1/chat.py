@@ -38,6 +38,7 @@ def _build_initial_state(req: ChatCompletionRequest, request_id: str) -> AgentSt
         request_id=request_id,
         forced_tool=req.eda_tool if req.eda_tool != "auto" else None,
         forced_mode=req.output_mode if req.output_mode != "auto" else None,
+        tools=[],
         intent=None,
         intent_confidence=0.0,
         detected_tool_namespace=None,
@@ -46,8 +47,10 @@ def _build_initial_state(req: ChatCompletionRequest, request_id: str) -> AgentSt
         retrieval_summary=None,
         output_mode="unknown",
         final_response=None,
+        response_content_blocks=None,
         token_usage={},
         stream_queue=None,
+        trace_writer=None,
     )
 
 

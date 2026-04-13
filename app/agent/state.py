@@ -10,6 +10,11 @@ class AgentState(TypedDict):
     request_id: str
     forced_tool: Optional[str]   # "primetime" | "innovus" | "both" | None
     forced_mode: Optional[str]   # "qa" | "tcl" | None
+    # Anthropic-format tool definitions forwarded from the client request.
+    # Used only by passthrough_node; EDA path ignores tools entirely.
+    tools: list[dict]
+    # Structured content blocks for tool_use responses (None = plain text)
+    response_content_blocks: Optional[list[dict]]
 
     # Intent detection
     intent: Optional[str]        # "eda" | "general" | "ambiguous"
