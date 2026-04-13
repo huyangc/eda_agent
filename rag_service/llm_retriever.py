@@ -54,7 +54,7 @@ async def generate_mock_docs(
 
     try:
         response = await client.chat.completions.create(
-            model=settings.llm_model,
+            model=settings.rag_llm_model,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": f"Query: {query}\nNamespace: {namespace}"},

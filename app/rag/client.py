@@ -17,7 +17,7 @@ class RAGClient:
     def __init__(self) -> None:
         self._client = httpx.AsyncClient(
             base_url=settings.rag_service_url,
-            timeout=15.0,
+            timeout=30.0,
         )
 
     @classmethod
