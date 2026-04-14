@@ -10,17 +10,30 @@ from app.agent.state import AgentState
 
 
 def _route_entry(state: AgentState) -> str:
-    """Short-circuit to passthrough when the request carries tools.
+    """Intelligently route requests at graph entry.
 
-    Tool-bearing requests come from Claude Code subagents performing file /
-    shell operations — they are never EDA queries and must never enter the
-    intent / RAG pipeline.
+    - Forced tool via API always bypasses short-circuits and enters intent.
+    - If it's an ongoing tool loop (subagent returning tool output), short-circuit to passthrough.
+    - Otherwise (real human query with text), enter intent_detector, even if tools are present.
     """
-    if state.get("tools") or state.get("forced_tool"):
-        # forced_tool is set only when the API caller explicitly picks an EDA
-        # namespace, so only plain tools (subagent calls) get the short-circuit.
-        if state.get("tools") and not state.get("forced_tool"):
-            return "passthrough"
+    if state.get("forced_tool") and state.get("forced_tool") != "auto":
+        return "intent_detector"
+
+    messages = state["messages"]
+    if not messages:
+        return "passthrough"
+
+    last_msg = messages[-1]
+
+    # If the last message is a ToolMessage (tool execution result) -> ongoing tool loop
+    if last_msg.type == "tool":
+        return "passthrough"
+        
+    # If the last message is a HumanMessage but empty or whitespace -> ongoing tool loop
+    if last_msg.type == "human" and not str(last_msg.content).strip():
+        return "passthrough"
+
+    # Human message with real text -> must detect intent
     return "intent_detector"
 
 

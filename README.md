@@ -267,9 +267,11 @@ Each line is a self-contained JSON event:
 
 4. **Two output modes**: `qa` (natural language) and `tcl` (fenced TCL code block). Detected automatically; overridable via request fields.
 
-5. **Tool-use relay**: For Claude Code subagent calls, tools are converted from Anthropic to OpenAI format and relayed back to the client without RAG processing.
+5. **Integrated Tool Use & RAG**: When Claude Code subagents call the backend, their tools are translated and bound to the backend LLM. If an EDA intent is detected, RAG context is injected *into* the tool-capable LLM prompt, empowering the LLM to generate `tool_use` instructions directly driven by RAG knowledge.
 
 6. **Concurrent LLM throttling**: A global semaphore limits concurrent LLM API calls to avoid rate-limit timeouts when Claude Code fires many parallel tool-use requests.
+
+7. **Client-Side Tool Execution (Red Line Architecture)**: The backend Agent *never* executes tools locally. It solely acts as the reasoning engine and RAG retriever—issuing `tool_use` JSON instructions via Server-Sent Events (SSE) back to the client. The client CLI (e.g. Claude Code) is entirely responsible for physically executing file/shell operations and returning the `tool_result` to the backend.
 
 ## License
 

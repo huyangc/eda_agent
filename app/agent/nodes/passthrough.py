@@ -270,6 +270,7 @@ async def _passthrough_with_tools(
     tools: list[dict],
     queue,
     rid: str,
+    custom_messages: list | None = None,
 ) -> dict:
     """Tool-use relay: bind tools, call LLM, push tool_use events into queue."""
     logger.info(
@@ -286,7 +287,7 @@ async def _passthrough_with_tools(
         max_retries=0
     ).bind_tools(oai_tools)  # type: ignore[attr-defined]
 
-    messages = list(state["messages"])
+    messages = custom_messages if custom_messages is not None else list(state["messages"])
     # Bypass all trimming/truncation per user request (retaining all history for huge context models like Qwen)
     # messages = _trim_message_history(messages, rid)
 

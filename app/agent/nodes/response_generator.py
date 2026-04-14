@@ -50,9 +50,16 @@ async def response_generator_node(state: AgentState) -> dict:
     # Build message list: system + conversation history
     messages = [SystemMessage(content=system_prompt)] + list(state["messages"])
 
-    llm = get_llm(streaming=True)
+    tools = state.get("tools") or []
     queue: Optional[asyncio.Queue] = state.get("stream_queue")  # type: ignore[assignment]
+    rid = req_id(state.get("request_id", ""))
 
+    if tools:
+        from app.agent.nodes.passthrough import _passthrough_with_tools
+        logger.info("%s [response_gen     ]  routing to tool_use execution", rid)
+        return await _passthrough_with_tools(state, tools, queue, rid, custom_messages=messages)
+
+    llm = get_llm(streaming=True)
     full_content = ""
     usage: dict = {}
 
@@ -65,7 +72,6 @@ async def response_generator_node(state: AgentState) -> dict:
     if queue is not None:
         await queue.put(None)  # sentinel: stream complete
 
-    rid = req_id(state.get("request_id", ""))
     stream_label = "streaming" if queue is not None else "sync"
     logger.info(
         "%s [response_gen     ]  mode=%-5s  %s  chars=%d",
