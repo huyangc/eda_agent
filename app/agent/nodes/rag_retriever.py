@@ -44,32 +44,26 @@ async def rag_retriever_node(state: AgentState) -> dict:
     user_query = _last_user_content(state["messages"])
     tw = state.get("trace_writer")
 
-    k_per_query = max(1, settings.rag_top_k // max(len(candidates), 1))
+    # Build query list: one compound query per candidate, or bare user query
+    if candidates:
+        queries = [f"{candidate} {user_query}".strip() for candidate in candidates]
+    else:
+        queries = [user_query]
+
+    if tw:
+        tw.rag_query(queries[0], namespace, len(queries))
+
+    docs = await client.retrieve_batch(queries=queries, namespace=namespace)
+
+    if tw:
+        tw.rag_response(queries[0], docs)
+
+    # Dedup by content fingerprint (safety net)
     seen: dict[str, dict] = {}
-
-    for candidate in candidates:
-        query = f"{candidate} {user_query}".strip()
-        if tw:
-            tw.rag_query(query, namespace, k_per_query)
-        docs = await client.retrieve(query=query, namespace=namespace, top_k=k_per_query)
-        if tw:
-            tw.rag_response(query, docs)
-        for doc in docs:
-            fp = _doc_fingerprint(doc)
-            if fp not in seen:
-                seen[fp] = doc
-
-    # Fallback: single query when no candidates extracted
-    if not candidates:
-        if tw:
-            tw.rag_query(user_query, namespace, settings.rag_top_k)
-        docs = await client.retrieve(query=user_query, namespace=namespace)
-        if tw:
-            tw.rag_response(user_query, docs)
-        for doc in docs:
-            fp = _doc_fingerprint(doc)
-            if fp not in seen:
-                seen[fp] = doc
+    for doc in docs:
+        fp = _doc_fingerprint(doc)
+        if fp not in seen:
+            seen[fp] = doc
 
     # Rank by score, take top K, filter by threshold
     all_docs = sorted(seen.values(), key=lambda d: d.get("score", 0.0), reverse=True)
@@ -83,7 +77,7 @@ async def rag_retriever_node(state: AgentState) -> dict:
         rid,
         "ON" if top_docs else "ON(0 docs)",
         namespace,
-        len(candidates) or 1,
+        len(queries),
         len(top_docs),
         top_score,
     )

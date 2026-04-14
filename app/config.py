@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     ollama_model: str = "llama3"
 
     # External RAG service
-    rag_service_url: str = "http://localhost:9000"
+    rag_service_url: str = "http://localhost:8081"
     rag_top_k: int = 6
     rag_score_threshold: float = 0.35
 
