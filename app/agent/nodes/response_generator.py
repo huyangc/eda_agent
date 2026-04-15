@@ -48,8 +48,19 @@ async def response_generator_node(state: AgentState) -> dict:
     )
 
     # Build message list: system + conversation history
-    messages = [SystemMessage(content=system_prompt)] + list(state["messages"])
-
+    # Merge existing SystemMessages with the RAG system prompt to prevent
+    # strict LLM backends from throwing "system message must be at the beginning"
+    base_messages = list(state["messages"])
+    merged_system = system_prompt
+    
+    filtered_messages = []
+    for m in base_messages:
+        if m.type == "system":
+            merged_system += "\n\n" + str(m.content)
+        else:
+            filtered_messages.append(m)
+            
+    messages = [SystemMessage(content=merged_system)] + filtered_messages
     tools = state.get("tools") or []
     queue: Optional[asyncio.Queue] = state.get("stream_queue")  # type: ignore[assignment]
     rid = req_id(state.get("request_id", ""))
